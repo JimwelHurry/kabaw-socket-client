@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kabaw Discord Test Client</title>
+    <link rel="stylesheet" href="http://localhost:8080/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Kabaw Discord Test Client</h1>
+        <p><strong>Running on port 6969 - Testing cross-origin WebSocket to port 8080</strong></p>
+
+        <div class="connection-form">
+            <h3>Connection Settings</h3>
+            <input type="text" id="username" placeholder="Username" value="testKabaw">
+            <input type="text" id="channel" placeholder="Channel" value="general">
+            <button id="connectBtn" onclick="connect()">Connect</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        </div>
+
+        <div id="status" class="status disconnected">Disconnected</div>
+
+        <div id="chatContainer" class="chat-container"></div>
+
+        <div class="message-form">
+            <input type="text" id="messageInput" placeholder="Type your message..." disabled>
+            <button id="sendBtn" onclick="sendMessage()" disabled>Send</button>
+        </div>
+
+        <div style="margin-top: 20px;">
+            <h3>Instructions:</h3>
+            <ol>
+                <li>Enter your username and channel name</li>
+                <li>Click "Connect" to establish WebSocket connection</li>
+                <li>Start typing messages in the input field</li>
+                <li>Open multiple tabs to test multi-user chat</li>
+            </ol>
+            <p><strong>Server endpoints (on port 8080):</strong></p>
+            <ul>
+                <li>WebSocket: <code>ws://localhost:8080/ws</code></li>
+                <li>Health: <a href="http://localhost:8080/health" target="_blank">http://localhost:8080/health</a></li>
+                <li>Stats: <a href="http://localhost:8080/stats" target="_blank">http://localhost:8080/stats</a></li>
+            </ul>
+            <p><strong>This client is served from port 6969 to test cross-origin WebSocket connections.</strong></p>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let currentUsername = '';
+        let currentUserID = null;
+
+        function connect() {
+            const username = document.getElementById('username').value || 'Anonymous';
+            const channel = document.getElementById('channel').value || 'general';
+
+            currentUsername = username;
+
+                        // Cross-origin WebSocket connection to port 8080 from port 6969
+            const wsUrl = `ws://localhost:8080/ws?username=${encodeURIComponent(username)}&channel=${encodeURIComponent(channel)}`;
+            
+            console.log(`[FRONTEND-CONNECT] Attempting to connect to: ${wsUrl}`);
+            
+            try {
+                ws = new WebSocket(wsUrl);
+
+                                ws.onopen = function(event) {
+                    console.log(`[FRONTEND-CONNECT] Connected to WebSocket as ${username} in channel ${channel}`);
+                    updateStatus('Connected', true);
+                    document.getElementById('connectBtn').disabled = true;
+                    document.getElementById('disconnectBtn').disabled = false;
+                    document.getElementById('messageInput').disabled = false;
+                    document.getElementById('sendBtn').disabled = false;
+                    
+                    addMessage('system', 'System', `Connected as ${username} to channel ${channel}`);
+                };
+
+                ws.onmessage = function(event) {
+                    const message = JSON.parse(event.data);
+                    console.log('[FRONTEND-MESSAGE]', JSON.stringify(message, null, 2));
+                    
+                    // Handle user connection message to get user ID
+                    if (message.type === 'user_connected' && message.user_id) {
+                        currentUserID = message.user_id;
+                        console.log(`[FRONTEND-USER-ID] Assigned user ID: ${currentUserID}`);
+                        addMessage('system', 'System', `Your user ID: ${currentUserID}`);
+                    }
+                    
+                    addMessage(message.type, message.username, message.content, message.timestamp);
+                };
+
+                                ws.onclose = function(event) {
+                    console.log(`[FRONTEND-DISCONNECT] Connection closed. Code: ${event.code}, Reason: ${event.reason || 'No reason provided'}`);
+                    updateStatus('Disconnected', false);
+                    document.getElementById('connectBtn').disabled = false;
+                    document.getElementById('disconnectBtn').disabled = true;
+                    document.getElementById('messageInput').disabled = true;
+                    document.getElementById('sendBtn').disabled = true;
+                    
+                    // Reset user ID
+                    currentUserID = null;
+                    console.log('[FRONTEND-USER-ID] User ID cleared');
+                    
+                    addMessage('system', 'System', 'Connection closed');
+                };
+
+                ws.onerror = function(error) {
+                    console.error('[FRONTEND-ERROR] WebSocket error:', error);
+                    addMessage('system', 'System', 'Connection error occurred');
+                };
+
+            } catch (error) {
+                console.error('[FRONTEND-ERROR] Failed to connect:', error);
+                addMessage('system', 'System', 'Failed to connect to server');
+            }
+        }
+
+        function disconnect() {
+            if (ws) {
+                console.log('[FRONTEND-DISCONNECT] User initiated disconnect');
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const content = messageInput.value.trim();
+
+            if (content && ws && ws.readyState === WebSocket.OPEN) {
+                const message = {
+                    type: 'message',
+                    content: content
+                };
+
+                console.log('[FRONTEND-SEND]', JSON.stringify(message, null, 2));
+                ws.send(JSON.stringify(message));
+                messageInput.value = '';
+            }
+        }
+
+        function addMessage(type, username, content, timestamp) {
+            const chatContainer = document.getElementById('chatContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+
+            if (type === 'system') {
+                messageDiv.innerHTML = `<em>${content}</em>`;
+            } else {
+                const isCurrentUser = username === currentUsername;
+                messageDiv.className += isCurrentUser ? ' user' : ' other';
+
+                const time = timestamp ? new Date(timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+                messageDiv.innerHTML = `<strong>${username}</strong> <small>(${time})</small><br>${content}`;
+            }
+
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function updateStatus(status, connected) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = status;
+            statusDiv.className = `status ${connected ? 'connected' : 'disconnected'}`;
+        }
+
+        // Handle Enter key in message input
+        document.getElementById('messageInput').addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // Handle Enter key in username/channel inputs
+        document.getElementById('username').addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                connect();
+            }
+        });
+
+        document.getElementById('channel').addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                connect();
+            }
+        });
+    </script>
+</body>
+</html>
